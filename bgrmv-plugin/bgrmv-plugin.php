@@ -37,9 +37,8 @@ class BGRMV_Plugin {
     public function enqueue_scripts() {
         global $post;
 
-        // Only load scripts if shortcode is present
+        // Only load styles if shortcode is present
         if (is_a($post, 'WP_Post') && (has_shortcode($post->post_content, 'bgrmv') || has_shortcode($post->post_content, 'background_remover'))) {
-
             // Enqueue styles
             wp_enqueue_style(
                 'bgrmv-styles',
@@ -47,30 +46,6 @@ class BGRMV_Plugin {
                 array(),
                 BGRMV_VERSION
             );
-
-            // Enqueue Transformers.js from CDN
-            wp_enqueue_script(
-                'transformers-js',
-                'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1',
-                array(),
-                '2.17.1',
-                true
-            );
-
-            // Enqueue main plugin script
-            wp_enqueue_script(
-                'bgrmv-script',
-                BGRMV_PLUGIN_URL . 'assets/js/bgrmv-script.js',
-                array('transformers-js'),
-                BGRMV_VERSION,
-                true
-            );
-
-            // Pass data to script
-            wp_localize_script('bgrmv-script', 'bgrmvData', array(
-                'pluginUrl' => BGRMV_PLUGIN_URL,
-                'modelId' => 'Xenova/modnet',
-            ));
         }
     }
 
@@ -79,6 +54,8 @@ class BGRMV_Plugin {
             'title' => 'AI Background Remover',
             'theme' => 'light',
         ), $atts, 'bgrmv');
+
+        $script_url = BGRMV_PLUGIN_URL . 'assets/js/bgrmv-script.js?ver=' . BGRMV_VERSION;
 
         ob_start();
         ?>
@@ -207,6 +184,9 @@ class BGRMV_Plugin {
                 <span>100% Private - Images processed on your device</span>
             </div>
         </div>
+
+        <!-- Load script as ES Module -->
+        <script type="module" src="<?php echo esc_url($script_url); ?>"></script>
         <?php
         return ob_get_clean();
     }
