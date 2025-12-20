@@ -13,7 +13,7 @@ function logError(...args) {
     console.error('[BGRMV ERROR]', ...args);
 }
 
-log('Script loaded - v1.0.3');
+log('Script loaded - v1.0.4');
 log('Starting import of transformers.js...');
 
 // Import transformers.js
@@ -325,7 +325,7 @@ async function processFile(file) {
         elements.processingProgress.style.width = '80%';
 
         log('Applying mask...');
-        const resultUrl = await applyMask(image, output.output);
+        const resultUrl = await applyMask(imageUrl, output.output);
         log('Mask applied successfully');
 
         elements.processingProgress.style.width = '100%';
@@ -354,9 +354,8 @@ function readFileAsDataURL(file) {
     });
 }
 
-async function applyMask(originalImage, maskOutput) {
+async function applyMask(imageUrl, maskOutput) {
     log('applyMask() called');
-    log('Original image:', { width: originalImage.width, height: originalImage.height });
     log('Mask output dims:', maskOutput.dims);
 
     const maskData = maskOutput.data;
@@ -365,13 +364,29 @@ async function applyMask(originalImage, maskOutput) {
 
     log('Mask size:', { maskWidth, maskHeight, dataLength: maskData.length });
 
+    // Load the original image as HTML Image element
+    const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = imageUrl;
+    });
+
+    log('Original image loaded:', { width: img.width, height: img.height });
+
     // Create result canvas at original image size
     const canvas = document.createElement('canvas');
-    canvas.width = originalImage.width;
-    canvas.height = originalImage.height;
+    canvas.width = img.width;
+    canvas.height = img.height;
     const ctx = canvas.getContext('2d');
 
-    // Create mask canvas
+    // Draw original image to canvas
+    ctx.drawImage(img, 0, 0);
+
+    // Get image data
+    const imageData = ctx.getImageData(0, 0, img.width, img.height);
+
+    // Create mask canvas at mask size
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = maskWidth;
     maskCanvas.height = maskHeight;
@@ -388,34 +403,24 @@ async function applyMask(originalImage, maskOutput) {
     }
     maskCtx.putImageData(maskImageData, 0, 0);
 
-    // Create original image canvas
-    const originalCanvas = document.createElement('canvas');
-    originalCanvas.width = originalImage.width;
-    originalCanvas.height = originalImage.height;
-    const originalCtx = originalCanvas.getContext('2d');
-
-    // Draw RawImage data to canvas
-    const imgData = originalCtx.createImageData(originalImage.width, originalImage.height);
-    for (let i = 0; i < originalImage.data.length; i++) {
-        imgData.data[i] = originalImage.data[i];
-    }
-    originalCtx.putImageData(imgData, 0, 0);
+    // Create a temporary canvas to scale the mask
+    const scaledMaskCanvas = document.createElement('canvas');
+    scaledMaskCanvas.width = img.width;
+    scaledMaskCanvas.height = img.height;
+    const scaledMaskCtx = scaledMaskCanvas.getContext('2d');
 
     // Scale mask to original image size
-    ctx.drawImage(maskCanvas, 0, 0, originalImage.width, originalImage.height);
-    const scaledMaskData = ctx.getImageData(0, 0, originalImage.width, originalImage.height);
+    scaledMaskCtx.drawImage(maskCanvas, 0, 0, img.width, img.height);
+    const scaledMaskData = scaledMaskCtx.getImageData(0, 0, img.width, img.height);
 
-    // Get original image data
-    const resultData = originalCtx.getImageData(0, 0, originalImage.width, originalImage.height);
-
-    // Apply mask as alpha channel
-    for (let i = 0; i < resultData.data.length / 4; i++) {
-        resultData.data[i * 4 + 3] = scaledMaskData.data[i * 4]; // Use R channel as alpha
+    // Apply mask as alpha channel to original image
+    for (let i = 0; i < imageData.data.length / 4; i++) {
+        // Use the R channel of the scaled mask as alpha
+        imageData.data[i * 4 + 3] = scaledMaskData.data[i * 4];
     }
 
-    // Draw final result
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.putImageData(resultData, 0, 0);
+    // Put the modified image data back
+    ctx.putImageData(imageData, 0, 0);
 
     return canvas.toDataURL('image/png');
 }
