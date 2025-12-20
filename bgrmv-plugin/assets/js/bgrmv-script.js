@@ -1,5 +1,5 @@
 /**
- * BGRMV - Background Remover Plugin v1.0.2
+ * BGRMV - Background Remover Plugin v1.0.3
  * Uses Xenova/modnet for client-side background removal
  * ES Module version using @huggingface/transformers v3
  */
@@ -13,7 +13,7 @@ function logError(...args) {
     console.error('[BGRMV ERROR]', ...args);
 }
 
-log('Script loaded - v1.0.2');
+log('Script loaded - v1.0.3');
 log('Starting import of transformers.js...');
 
 // Import transformers.js
@@ -27,7 +27,6 @@ try {
     AutoProcessor = transformers.AutoProcessor;
     RawImage = transformers.RawImage;
     log('Transformers.js imported successfully!');
-    log('Available exports:', Object.keys(transformers));
 } catch (importError) {
     logError('Failed to import transformers.js:', importError);
     throw importError;
@@ -35,7 +34,7 @@ try {
 
 // Configuration
 const MODEL_ID = 'Xenova/modnet';
-const CACHE_KEY = 'bgrmv_model_loaded_v2';
+const CACHE_KEY = 'bgrmv_model_loaded_v3';
 
 log('Configuration:', { MODEL_ID, CACHE_KEY });
 
@@ -95,21 +94,17 @@ function init() {
         return;
     }
 
-    // Configure transformers.js
+    // Configure transformers.js - IMPORTANT: disable WASM proxy for browser
     log('Configuring transformers.js environment...');
     try {
         env.backends.onnx.wasm.proxy = false;
         env.allowLocalModels = false;
-        log('Environment configured:', {
-            wasmProxy: env.backends.onnx.wasm.proxy,
-            allowLocalModels: env.allowLocalModels
-        });
+        log('Environment configured');
     } catch (envError) {
         logError('Failed to configure environment:', envError);
     }
 
     // Setup event listeners
-    log('Setting up event listeners...');
     setupEventListeners();
 
     // Check if first time
@@ -154,47 +149,61 @@ async function preloadModel() {
     isModelLoading = true;
     elements.modelStatus.style.display = 'block';
 
-    // Check for WebGPU support
-    log('Checking WebGPU support...');
-    let hasWebGPU = false;
-    try {
-        hasWebGPU = 'gpu' in navigator;
-        if (hasWebGPU) {
-            const adapter = await navigator.gpu?.requestAdapter();
-            hasWebGPU = !!adapter;
-            log('WebGPU adapter:', adapter ? 'found' : 'not found');
-        }
-    } catch (gpuError) {
-        log('WebGPU check error:', gpuError);
-        hasWebGPU = false;
-    }
-
-    const device = hasWebGPU ? 'webgpu' : 'wasm';
-    log('Selected device:', device);
+    // Use WASM by default - it's more reliable than WebGPU for this model
+    // WebGPU can hang on some systems
+    const device = 'wasm';
+    log('Using device:', device, '(WASM is more reliable for ModNet)');
 
     // Update UI
-    elements.loaderLabel.textContent = 'Loading AI Model...';
+    elements.loaderLabel.textContent = 'Downloading AI Model...';
     elements.loaderPercent.textContent = '0%';
+    elements.progressFill.style.width = '0%';
 
-    // Try loading with selected device
     try {
-        log(`Loading model with ${device}...`);
-        log('Calling AutoModel.from_pretrained...');
+        log('Loading model...');
 
         model = await AutoModel.from_pretrained(MODEL_ID, {
             device: device,
-            progress_callback: handleModelProgress,
+            progress_callback: (progress) => {
+                if (!progress) return;
+
+                // Detailed progress logging
+                if (progress.status === 'progress') {
+                    const percent = Math.round(progress.progress || 0);
+                    const file = progress.file || 'model files';
+                    const loaded = progress.loaded ? `${(progress.loaded / 1024 / 1024).toFixed(1)}MB` : '';
+                    const total = progress.total ? `${(progress.total / 1024 / 1024).toFixed(1)}MB` : '';
+
+                    log(`Download: ${file} - ${percent}% ${loaded}/${total}`);
+
+                    elements.loaderLabel.textContent = `Downloading ${file}...`;
+                    elements.loaderPercent.textContent = `${percent}%`;
+                    elements.progressFill.style.width = `${Math.min(percent * 0.8, 80)}%`; // Cap at 80% for model
+                } else if (progress.status === 'done') {
+                    log('Download complete for:', progress.file);
+                } else if (progress.status === 'initiate') {
+                    log('Starting download:', progress.file);
+                } else {
+                    log('Progress status:', progress.status, progress);
+                }
+            },
         });
 
-        log('Model loaded successfully!', model);
-
-        elements.loaderLabel.textContent = 'Loading processor...';
-        elements.loaderPercent.textContent = '90%';
-        elements.progressFill.style.width = '90%';
+        log('Model loaded successfully!');
+        elements.loaderLabel.textContent = 'Loading image processor...';
+        elements.loaderPercent.textContent = '85%';
+        elements.progressFill.style.width = '85%';
 
         log('Loading processor...');
         processor = await AutoProcessor.from_pretrained(MODEL_ID);
-        log('Processor loaded successfully!', processor);
+        log('Processor loaded successfully!');
+
+        elements.loaderLabel.textContent = 'Ready!';
+        elements.loaderPercent.textContent = '100%';
+        elements.progressFill.style.width = '100%';
+
+        // Brief delay to show 100%
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         localStorage.setItem(CACHE_KEY, 'true');
         elements.firstTimeNotice.style.display = 'none';
@@ -203,60 +212,17 @@ async function preloadModel() {
         log('Model and processor ready!');
 
     } catch (error) {
-        logError(`Failed to load with ${device}:`, error);
+        logError('Failed to load model:', error);
         logError('Error details:', {
             name: error.name,
             message: error.message,
             stack: error.stack
         });
-
-        // Try WASM fallback if we were using WebGPU
-        if (device === 'webgpu') {
-            log('Trying WASM fallback...');
-            try {
-                model = await AutoModel.from_pretrained(MODEL_ID, {
-                    device: 'wasm',
-                    progress_callback: handleModelProgress,
-                });
-
-                processor = await AutoProcessor.from_pretrained(MODEL_ID);
-
-                log('WASM fallback successful!');
-                localStorage.setItem(CACHE_KEY, 'true');
-                elements.firstTimeNotice.style.display = 'none';
-                elements.modelStatus.style.display = 'none';
-
-            } catch (fallbackError) {
-                logError('WASM fallback also failed:', fallbackError);
-                showError('Failed to load AI model. Error: ' + fallbackError.message);
-                elements.modelStatus.style.display = 'none';
-            }
-        } else {
-            showError('Failed to load AI model. Error: ' + error.message);
-            elements.modelStatus.style.display = 'none';
-        }
+        showError('Failed to load AI model: ' + error.message);
+        elements.modelStatus.style.display = 'none';
     } finally {
         isModelLoading = false;
         log('preloadModel() finished', { model: !!model, processor: !!processor });
-    }
-}
-
-function handleModelProgress(progress) {
-    if (!progress) return;
-
-    log('Model progress:', progress);
-
-    if (progress.status === 'progress' && progress.progress !== undefined) {
-        const percent = Math.round(progress.progress);
-        const fileName = progress.file || 'model';
-        elements.loaderLabel.textContent = `Loading ${fileName}...`;
-        elements.loaderPercent.textContent = `${percent}%`;
-        elements.progressFill.style.width = `${Math.min(percent, 85)}%`;
-    } else if (progress.status === 'done') {
-        elements.loaderPercent.textContent = '85%';
-        elements.progressFill.style.width = '85%';
-    } else if (progress.status === 'ready') {
-        elements.progressFill.style.width = '100%';
     }
 }
 
@@ -327,38 +293,40 @@ async function processFile(file) {
         }
 
         if (!model || !processor) {
-            throw new Error('Model failed to load');
+            throw new Error('Model failed to load. Please refresh the page and try again.');
         }
 
         log('Reading file as data URL...');
         const imageUrl = await readFileAsDataURL(file);
         elements.originalImage.src = imageUrl;
 
-        elements.processingText.textContent = 'Analyzing image...';
-        elements.processingProgress.style.width = '30%';
+        elements.processingText.textContent = 'Loading image...';
+        elements.processingProgress.style.width = '20%';
 
         log('Loading image with RawImage...');
         const image = await RawImage.fromURL(imageUrl);
         log('Image loaded:', { width: image.width, height: image.height, channels: image.channels });
 
-        elements.processingText.textContent = 'Removing background...';
-        elements.processingProgress.style.width = '50%';
+        elements.processingText.textContent = 'Processing image...';
+        elements.processingProgress.style.width = '40%';
 
-        log('Processing through model...');
+        log('Running processor...');
         const { pixel_values } = await processor(image);
-        log('Pixel values generated:', pixel_values?.dims);
+        log('Pixel values shape:', pixel_values.dims);
 
-        elements.processingProgress.style.width = '70%';
+        elements.processingText.textContent = 'Removing background...';
+        elements.processingProgress.style.width = '60%';
 
-        log('Running inference...');
+        log('Running model inference...');
         const output = await model({ input: pixel_values });
         log('Inference complete, output keys:', Object.keys(output));
 
         elements.processingText.textContent = 'Generating result...';
-        elements.processingProgress.style.width = '90%';
+        elements.processingProgress.style.width = '80%';
 
         log('Applying mask...');
         const resultUrl = await applyMask(image, output.output);
+        log('Mask applied successfully');
 
         elements.processingProgress.style.width = '100%';
 
@@ -370,11 +338,6 @@ async function processFile(file) {
 
     } catch (error) {
         logError('Processing error:', error);
-        logError('Error details:', {
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-        });
         showError('Failed to process image: ' + error.message);
         resetToUpload();
     } finally {
@@ -392,61 +355,68 @@ function readFileAsDataURL(file) {
 }
 
 async function applyMask(originalImage, maskOutput) {
-    log('applyMask() called', {
-        imageSize: `${originalImage.width}x${originalImage.height}`,
-        maskDims: maskOutput?.dims
-    });
+    log('applyMask() called');
+    log('Original image:', { width: originalImage.width, height: originalImage.height });
+    log('Mask output dims:', maskOutput.dims);
 
     const maskData = maskOutput.data;
-    const maskWidth = maskOutput.dims[3];
     const maskHeight = maskOutput.dims[2];
+    const maskWidth = maskOutput.dims[3];
 
-    log('Mask dimensions:', { maskWidth, maskHeight, dataLength: maskData.length });
+    log('Mask size:', { maskWidth, maskHeight, dataLength: maskData.length });
 
+    // Create result canvas at original image size
     const canvas = document.createElement('canvas');
     canvas.width = originalImage.width;
     canvas.height = originalImage.height;
     const ctx = canvas.getContext('2d');
 
+    // Create mask canvas
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = maskWidth;
     maskCanvas.height = maskHeight;
     const maskCtx = maskCanvas.getContext('2d');
     const maskImageData = maskCtx.createImageData(maskWidth, maskHeight);
 
+    // Convert mask tensor to grayscale image
     for (let i = 0; i < maskData.length; i++) {
-        const alpha = Math.round(maskData[i] * 255);
-        maskImageData.data[i * 4] = alpha;
-        maskImageData.data[i * 4 + 1] = alpha;
-        maskImageData.data[i * 4 + 2] = alpha;
-        maskImageData.data[i * 4 + 3] = 255;
+        const value = Math.round(maskData[i] * 255);
+        maskImageData.data[i * 4] = value;     // R
+        maskImageData.data[i * 4 + 1] = value; // G
+        maskImageData.data[i * 4 + 2] = value; // B
+        maskImageData.data[i * 4 + 3] = 255;   // A
     }
     maskCtx.putImageData(maskImageData, 0, 0);
 
+    // Create original image canvas
     const originalCanvas = document.createElement('canvas');
     originalCanvas.width = originalImage.width;
     originalCanvas.height = originalImage.height;
     const originalCtx = originalCanvas.getContext('2d');
 
+    // Draw RawImage data to canvas
     const imgData = originalCtx.createImageData(originalImage.width, originalImage.height);
     for (let i = 0; i < originalImage.data.length; i++) {
         imgData.data[i] = originalImage.data[i];
     }
     originalCtx.putImageData(imgData, 0, 0);
 
+    // Scale mask to original image size
     ctx.drawImage(maskCanvas, 0, 0, originalImage.width, originalImage.height);
-
     const scaledMaskData = ctx.getImageData(0, 0, originalImage.width, originalImage.height);
+
+    // Get original image data
     const resultData = originalCtx.getImageData(0, 0, originalImage.width, originalImage.height);
 
+    // Apply mask as alpha channel
     for (let i = 0; i < resultData.data.length / 4; i++) {
-        resultData.data[i * 4 + 3] = scaledMaskData.data[i * 4];
+        resultData.data[i * 4 + 3] = scaledMaskData.data[i * 4]; // Use R channel as alpha
     }
 
+    // Draw final result
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.putImageData(resultData, 0, 0);
 
-    log('Mask applied successfully');
     return canvas.toDataURL('image/png');
 }
 
