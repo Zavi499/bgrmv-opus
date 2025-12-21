@@ -1,5 +1,5 @@
 /**
- * BGRMV - Background Remover Plugin v1.0.5
+ * BGRMV - Background Remover Plugin v1.0.6
  * Uses Xenova/modnet for client-side background removal
  * ES Module version using @huggingface/transformers v3
  */
@@ -13,7 +13,7 @@ function logError(...args) {
     console.error('[BGRMV ERROR]', ...args);
 }
 
-log('Script loaded - v1.0.5');
+log('Script loaded - v1.0.6');
 log('Starting import of transformers.js...');
 
 // Import transformers.js
@@ -43,6 +43,19 @@ let model = null;
 let processor = null;
 let isModelLoading = false;
 let isProcessing = false;
+
+// Loading tips to keep users engaged
+const LOADING_TIPS = [
+    "Your images never leave your device - complete privacy!",
+    "The AI model runs entirely in your browser",
+    "Works offline after the first load",
+    "No sign-up or account required",
+    "Processing happens on your device, not our servers",
+    "The model is being optimized for your device..."
+];
+
+let tipIndex = 0;
+let tipInterval = null;
 
 // DOM Elements
 let elements = {};
@@ -137,19 +150,6 @@ function checkFirstTimeVisitor() {
         elements.firstTimeNotice.style.display = 'flex';
     }
 }
-
-// Loading tips to keep users engaged
-const LOADING_TIPS = [
-    "Your images never leave your device - complete privacy!",
-    "The AI model runs entirely in your browser",
-    "Works offline after the first load",
-    "No sign-up or account required",
-    "Processing happens on your device, not our servers",
-    "The model is being optimized for your device..."
-];
-
-let tipIndex = 0;
-let tipInterval = null;
 
 function startTipRotation() {
     if (elements.modelHint) {
