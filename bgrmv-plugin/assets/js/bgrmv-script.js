@@ -1,5 +1,5 @@
 /**
- * BGRMV - Background Remover Plugin v1.0.3
+ * BGRMV - Background Remover Plugin v1.0.5
  * Uses Xenova/modnet for client-side background removal
  * ES Module version using @huggingface/transformers v3
  */
@@ -13,7 +13,7 @@ function logError(...args) {
     console.error('[BGRMV ERROR]', ...args);
 }
 
-log('Script loaded - v1.0.4');
+log('Script loaded - v1.0.5');
 log('Starting import of transformers.js...');
 
 // Import transformers.js
@@ -138,6 +138,36 @@ function checkFirstTimeVisitor() {
     }
 }
 
+// Loading tips to keep users engaged
+const LOADING_TIPS = [
+    "Your images never leave your device - complete privacy!",
+    "The AI model runs entirely in your browser",
+    "Works offline after the first load",
+    "No sign-up or account required",
+    "Processing happens on your device, not our servers",
+    "The model is being optimized for your device..."
+];
+
+let tipIndex = 0;
+let tipInterval = null;
+
+function startTipRotation() {
+    if (elements.modelHint) {
+        elements.modelHint.textContent = LOADING_TIPS[0];
+        tipInterval = setInterval(() => {
+            tipIndex = (tipIndex + 1) % LOADING_TIPS.length;
+            elements.modelHint.textContent = LOADING_TIPS[tipIndex];
+        }, 3000);
+    }
+}
+
+function stopTipRotation() {
+    if (tipInterval) {
+        clearInterval(tipInterval);
+        tipInterval = null;
+    }
+}
+
 async function preloadModel() {
     log('preloadModel() called', { model: !!model, isModelLoading });
 
@@ -150,14 +180,19 @@ async function preloadModel() {
     elements.modelStatus.style.display = 'block';
 
     // Use WASM by default - it's more reliable than WebGPU for this model
-    // WebGPU can hang on some systems
     const device = 'wasm';
     log('Using device:', device, '(WASM is more reliable for ModNet)');
 
-    // Update UI
+    // Start rotating tips
+    startTipRotation();
+
+    // Update UI - Phase 1: Download
     elements.loaderLabel.textContent = 'Downloading AI Model...';
     elements.loaderPercent.textContent = '0%';
     elements.progressFill.style.width = '0%';
+    elements.progressFill.classList.remove('bgrmv-progress-indeterminate');
+
+    let downloadComplete = false;
 
     try {
         log('Loading model...');
@@ -167,7 +202,6 @@ async function preloadModel() {
             progress_callback: (progress) => {
                 if (!progress) return;
 
-                // Detailed progress logging
                 if (progress.status === 'progress') {
                     const percent = Math.round(progress.progress || 0);
                     const file = progress.file || 'model files';
@@ -176,11 +210,20 @@ async function preloadModel() {
 
                     log(`Download: ${file} - ${percent}% ${loaded}/${total}`);
 
+                    // Show download progress (0-70%)
                     elements.loaderLabel.textContent = `Downloading ${file}...`;
                     elements.loaderPercent.textContent = `${percent}%`;
-                    elements.progressFill.style.width = `${Math.min(percent * 0.8, 80)}%`; // Cap at 80% for model
+                    elements.progressFill.style.width = `${Math.min(percent * 0.7, 70)}%`;
                 } else if (progress.status === 'done') {
                     log('Download complete for:', progress.file);
+                    if (progress.file && progress.file.includes('model.onnx')) {
+                        downloadComplete = true;
+                        // Phase 2: Initializing - show indeterminate progress
+                        elements.loaderLabel.textContent = 'Initializing AI engine...';
+                        elements.loaderPercent.textContent = '';
+                        elements.progressFill.style.width = '100%';
+                        elements.progressFill.classList.add('bgrmv-progress-indeterminate');
+                    }
                 } else if (progress.status === 'initiate') {
                     log('Starting download:', progress.file);
                 } else {
@@ -190,20 +233,28 @@ async function preloadModel() {
         });
 
         log('Model loaded successfully!');
+
+        // Phase 3: Loading processor
+        elements.progressFill.classList.remove('bgrmv-progress-indeterminate');
         elements.loaderLabel.textContent = 'Loading image processor...';
-        elements.loaderPercent.textContent = '85%';
-        elements.progressFill.style.width = '85%';
+        elements.loaderPercent.textContent = '90%';
+        elements.progressFill.style.width = '90%';
 
         log('Loading processor...');
         processor = await AutoProcessor.from_pretrained(MODEL_ID);
         log('Processor loaded successfully!');
 
-        elements.loaderLabel.textContent = 'Ready!';
+        // Phase 4: Ready!
+        elements.loaderLabel.textContent = 'Ready to remove backgrounds!';
         elements.loaderPercent.textContent = '100%';
         elements.progressFill.style.width = '100%';
 
-        // Brief delay to show 100%
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Stop tip rotation
+        stopTipRotation();
+        elements.modelHint.textContent = 'Model loaded and cached for future visits!';
+
+        // Brief delay to show success
+        await new Promise(resolve => setTimeout(resolve, 800));
 
         localStorage.setItem(CACHE_KEY, 'true');
         elements.firstTimeNotice.style.display = 'none';
@@ -218,6 +269,7 @@ async function preloadModel() {
             message: error.message,
             stack: error.stack
         });
+        stopTipRotation();
         showError('Failed to load AI model: ' + error.message);
         elements.modelStatus.style.display = 'none';
     } finally {

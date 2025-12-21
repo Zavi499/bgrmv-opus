@@ -209,6 +209,32 @@
     }
 }
 
+/* Indeterminate progress animation for initialization phase */
+.bgrmv-progress-indeterminate {
+    background: linear-gradient(
+        90deg,
+        var(--bgrmv-primary) 0%,
+        var(--bgrmv-primary-hover) 25%,
+        #818cf8 50%,
+        var(--bgrmv-primary-hover) 75%,
+        var(--bgrmv-primary) 100%
+    );
+    background-size: 300% 100%;
+    animation: bgrmv-indeterminate 2s ease-in-out infinite;
+}
+
+@keyframes bgrmv-indeterminate {
+    0% {
+        background-position: 100% 0;
+    }
+    50% {
+        background-position: 0% 0;
+    }
+    100% {
+        background-position: 100% 0;
+    }
+}
+
 .bgrmv-hint {
     font-size: 12px;
     color: var(--bgrmv-text-muted);
